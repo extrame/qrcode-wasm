@@ -1,0 +1,8 @@
+env.build {
+    GOOS: js
+    GOARCH: wasm
+}
+
+build (.build) {
+    go build -o src/assets/lib.wasm ./wasm
+}

@@ -14,9 +14,14 @@ import (
 	"github.com/golang/freetype/truetype"
 )
 
+var hostedFonts = map[string]interface{}{
+	"思源宋体": "SourceHanSerifSC-VF.ttf",
+}
+
 var currentEnv = &Env{
 	FontSize: 12,
 	Dpi:      72,
+	Width:    256,
 	Font:     "Courier",
 }
 
@@ -25,7 +30,10 @@ type Env struct {
 	Dpi      int
 	Font     string
 	font     *truetype.Font
-	records  [][]string
+	Title    string
+	Width    int
+
+	records [][]string
 }
 
 func (e *Env) ToValue() js.Value {
@@ -59,9 +67,27 @@ func setConfig(this js.Value, args []js.Value) interface{} {
 			log.Println(err)
 		}
 		currentEnv.font = f
-	} else {
+	} else if fontUrl.Scheme == "file" {
 		//load font from local
 		fmt.Println("Loading font from local: ", currentEnv.Font)
+	} else {
+		//read font from server
+		//get host from js
+		host := js.Global().Get("window").Get("location").Get("hostname").String()
+		fmt.Println("Loading font from server: ", host)
+		resp, err := http.Get("http://" + host + "/font/" + currentEnv.Font)
+		if err != nil {
+			fmt.Println("Error loading font: ", err)
+		}
+		defer resp.Body.Close()
+		bts := make([]byte, resp.ContentLength)
+		resp.Body.Read(bts)
+		//load font from bytes
+		f, err := freetype.ParseFont(bts)
+		if err != nil {
+			log.Println(err)
+		}
+		currentEnv.font = f
 	}
 
 	return currentEnv.ToValue()
@@ -111,6 +137,23 @@ func main() {
 			return 0
 		}
 		return len(currentEnv.records[0])
+	}))
+	//register set_export_settings_"+*prefix
+	js.Global().Set("set_export_settings_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		var arg = args[0]
+		currentEnv.Width = int(arg.Get("width").Int())
+		currentEnv.Title = arg.Get("title").String()
+		return nil
+	}))
+
+	//register get_preview_"+*prefix
+	js.Global().Set("get_preview_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return nil
+	}))
+	//register get_hosted_fonts_"+*prefix
+	js.Global().Set("get_hosted_fonts_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		fmt.Println("Getting hosted fonts", hostedFonts)
+		return hostedFonts
 	}))
 
 	//call wasm_ready_"+*prefix function of js
