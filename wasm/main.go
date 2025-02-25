@@ -1,0 +1,119 @@
+package main
+
+import (
+	"bytes"
+	"encoding/csv"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"net/url"
+	"syscall/js"
+
+	"github.com/golang/freetype"
+	"github.com/golang/freetype/truetype"
+)
+
+var currentEnv = &Env{
+	FontSize: 12,
+	Dpi:      72,
+	Font:     "Courier",
+}
+
+type Env struct {
+	FontSize int
+	Dpi      int
+	Font     string
+	font     *truetype.Font
+	records  [][]string
+}
+
+func (e *Env) ToValue() js.Value {
+	return js.ValueOf(map[string]interface{}{
+		"font_size": e.FontSize,
+		"dpi":       e.Dpi,
+		"font":      e.Font,
+	})
+}
+
+func setConfig(this js.Value, args []js.Value) interface{} {
+	var obj = args[0]
+	currentEnv.FontSize = int(obj.Get("font_size").Int())
+	currentEnv.Dpi = int(obj.Get("dpi").Int())
+	currentEnv.Font = obj.Get("font").String()
+
+	//if font is url, load it
+	fontUrl, _ := url.Parse(currentEnv.Font)
+	if fontUrl.Scheme == "http" || fontUrl.Scheme == "https" {
+		//load font from web
+		resp, err := http.Get(currentEnv.Font)
+		if err != nil {
+			fmt.Println("Error loading font: ", err)
+		}
+		defer resp.Body.Close()
+		bts := make([]byte, resp.ContentLength)
+		resp.Body.Read(bts)
+		//load font from bytes
+		f, err := freetype.ParseFont(bts)
+		if err != nil {
+			log.Println(err)
+		}
+		currentEnv.font = f
+	} else {
+		//load font from local
+		fmt.Println("Loading font from local: ", currentEnv.Font)
+	}
+
+	return currentEnv.ToValue()
+}
+
+func getConfig(this js.Value, args []js.Value) interface{} {
+	return currentEnv.ToValue()
+}
+
+func readCSV(this js.Value, args []js.Value) interface{} {
+	var csvContent = args[0]
+	fmt.Println("input type", csvContent.Type())
+	dst := make([]byte, csvContent.Length())
+	js.CopyBytesToGo(dst, csvContent)
+	buf := bytes.NewBuffer(dst)
+	csvReader := csv.NewReader(buf)
+	csvReader.Comma = ','
+	records, err := csvReader.ReadAll()
+	if err != nil {
+		fmt.Println("Error reading csv: ", err)
+	}
+	currentEnv.records = records
+	return len(records)
+}
+
+func main() {
+	prefix := flag.String("prefix", "", "prefix")
+	flag.Parse()
+
+	done := make(chan int, 0)
+	js.Global().Set("set_config_"+*prefix, js.FuncOf(setConfig))
+	js.Global().Set("get_config_"+*prefix, js.FuncOf(getConfig))
+	js.Global().Set("read_csv_"+*prefix, js.FuncOf(readCSV))
+	//register csv_length_"+*prefix
+	js.Global().Set("csv_length_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return len(currentEnv.records)
+	}))
+	//register csv_get_"+*prefix
+	js.Global().Set("csv_get_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		row := int(args[0].Int())
+		column := int(args[1].Int())
+		return currentEnv.records[row][column]
+	}))
+	//register get_csv_columns_"+*prefix
+	js.Global().Set("get_csv_columns_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if len(currentEnv.records) == 0 {
+			return 0
+		}
+		return len(currentEnv.records[0])
+	}))
+
+	//call wasm_ready_"+*prefix function of js
+	js.Global().Call("wasm_ready_"+*prefix, currentEnv.ToValue())
+	<-done
+}
