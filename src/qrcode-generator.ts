@@ -6,6 +6,7 @@ import { range } from "lit/directives/range.js";
 import { map } from "lit/directives/map.js";
 import { choose } from "lit/directives/choose.js";
 import { classMap } from "lit/directives/class-map.js";
+import { when } from "lit/directives/when.js";
 
 interface Config {
   font_size: number;
@@ -14,6 +15,7 @@ interface Config {
   title: string;
   font_source: string;
   font: string;
+  template: string;
 }
 
 /**
@@ -37,6 +39,8 @@ export class QrcodeGenerator extends LitElement {
   @state() pageOffset: number = 0;
   @state() pageSize: number = 10;
   @state() showingAside: String = "about";
+  @state() localFonts: any[] = [];
+  @state() preview: string = "";
 
   constructor() {
     super();
@@ -62,6 +66,7 @@ export class QrcodeGenerator extends LitElement {
     title: "",
     font_source: "server",
     font: "",
+    template: "",
   };
 
   changeConfig(e: Event) {
@@ -120,21 +125,24 @@ export class QrcodeGenerator extends LitElement {
         }
       };
       reader.readAsArrayBuffer(fileInput.files[0]);
+      this.getPreview();
     }
   }
-
-  handleExportChange(e: Event) {
-    e.preventDefault();
-    const formData = new FormData(e.target as HTMLFormElement);
+  getPreview() {
     // @ts-ignore
-    var callFn = window["export_csv_" + this.randonStr];
-    callFn.call(this, formData.get("title"));
+    this.preview = window["get_preview_" + this.randonStr].call(this);
+    this.requestUpdate();
   }
 
-  get preview() {
+  handleExportChange(key: string, e: Event) {
+    e.preventDefault();
+    var value = (e.target as HTMLInputElement).value;
     // @ts-ignore
-    var callFn = window["get_preview_" + this.randonStr];
-    return callFn.call(this);
+    var callFn = window["set_export_settings_" + this.randonStr];
+    callFn.call(this, key, value);
+    // @ts-ignore
+    this.preview = window["get_preview_" + this.randonStr].call(this);
+    this.requestUpdate();
   }
 
   get fontServerSources(): {
@@ -149,12 +157,35 @@ export class QrcodeGenerator extends LitElement {
     }));
   }
 
-  handleFontSourceChange(e: Event) {
+  async handleFontSourceChange(e: Event) {
     // get value from first checked radio named 'font_source'
     var selected = this.shadowRoot?.querySelector(
       "input[name='font_source']:checked"
     ) as HTMLInputElement;
     this.config.font_source = selected.value ?? "server";
+
+    if (this.config.font_source === "browser") {
+      //get font from browser (need chrome or firefox)
+      if ("queryLocalFonts" in window) {
+        await navigator.permissions
+          .query({ name: "local-fonts" })
+          .then((result) => {
+            if (result.state === "granted") {
+              // The Local Font Access API is supported and the user has granted permission
+              console.log("Local Font Access API is supported");
+            } else {
+              // The Local Font Access API is not supported or the user has denied permission
+              console.log("Local Font Access API is not supported");
+            }
+          });
+        // The Local Font Access API is supported
+        // @ts-ignore
+        this.localFonts = await window.queryLocalFonts();
+      } else {
+        console.log("Local Font Access API is not supported");
+      }
+    }
+
     this.requestUpdate();
   }
 
@@ -296,6 +327,28 @@ export class QrcodeGenerator extends LitElement {
                         type="radio"
                         name="font_source"
                         @change=${this.handleFontSourceChange}
+                        value="browser"
+                        ?checked=${this.config.font_source === "browser"}
+                      />浏览器字体文件</label
+                    >
+                    <select
+                      id="font_server_source"
+                      ?hidden=${this.config.font_source !== "browser"}
+                      @change=${this.handleExportChange.bind(this, "font")}
+                    >
+                      ${map(
+                        this.localFonts,
+                        (source, index) =>
+                          html`<option value="${index}">
+                            ${source.fullName}
+                          </option>`
+                      )}
+                    </select>
+                    <label
+                      ><input
+                        type="radio"
+                        name="font_source"
+                        @change=${this.handleFontSourceChange}
                         value="local"
                         ?checked=${this.config.font_source === "local"}
                       />本地字体文件</label
@@ -338,7 +391,9 @@ export class QrcodeGenerator extends LitElement {
                       ${map(
                         this.fontServerSources,
                         (source) =>
-                          html`<option value="${source.url}">${source.name}</option>`
+                          html`<option value="${source.url}">
+                            ${source.name}
+                          </option>`
                       )}
                     </select>
                   </div>
@@ -355,14 +410,16 @@ export class QrcodeGenerator extends LitElement {
                   @change=${this.handleCsvFileChange}
                 />
                 <small>选择CSV文件</small>
-                <label for="title">标题</label>
-                <input
-                  type="text"
-                  id="title"
-                  name="title"
-                  value=${this.config.title}
-                  @change=${this.handleExportChange}
-                />
+                <div>
+                  <label for="template">模板</label>
+                  <input
+                    type="text"
+                    id="template"
+                    name="template"
+                    value=${this.config.template}
+                    @change=${this.handleExportChange.bind(this, "template")}
+                  />
+                </div>
                 <label for="width">宽度</label>
                 <input
                   type="number"
@@ -374,10 +431,12 @@ export class QrcodeGenerator extends LitElement {
                   step="10"
                   @change=${this.handleExportChange}
                 />
-
-                <div class="preview">
-                  <img src="${this.preview}" alt="Preview" />
-                </div>
+                ${when(
+                  this.preview,
+                  () => html`<div class="preview">
+                    <img src="data:image/png;base64,${this.preview}" alt="Preview" />
+                  </div>`
+                )}
               `,
             ],
           ])}

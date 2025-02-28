@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/csv"
 	"flag"
 	"fmt"
@@ -9,9 +10,11 @@ import (
 	"net/http"
 	"net/url"
 	"syscall/js"
+	"text/template"
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 var hostedFonts = map[string]interface{}{
@@ -19,19 +22,23 @@ var hostedFonts = map[string]interface{}{
 }
 
 var currentEnv = &Env{
-	FontSize: 12,
-	Dpi:      72,
-	Width:    256,
-	Font:     "Courier",
+	FontSize:   12,
+	Dpi:        72,
+	Width:      256,
+	Font:       "Courier",
+	template:   `${record[0]}`,
+	previewRow: 0,
 }
 
 type Env struct {
-	FontSize int
-	Dpi      int
-	Font     string
-	font     *truetype.Font
-	Title    string
-	Width    int
+	FontSize   int
+	Dpi        int
+	Font       string
+	font       *truetype.Font
+	Title      string
+	Width      int
+	template   string
+	previewRow int
 
 	records [][]string
 }
@@ -140,15 +147,28 @@ func main() {
 	}))
 	//register set_export_settings_"+*prefix
 	js.Global().Set("set_export_settings_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		var arg = args[0]
-		currentEnv.Width = int(arg.Get("width").Int())
-		currentEnv.Title = arg.Get("title").String()
+		var key = args[0]
+		var value = args[1]
+		switch key.String() {
+		case "template":
+			currentEnv.template = value.String()
+
+		}
 		return nil
 	}))
 
 	//register get_preview_"+*prefix
 	js.Global().Set("get_preview_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		return nil
+		var content = template.Must(template.New("").Parse(currentEnv.template))
+		if len(currentEnv.records) >= currentEnv.previewRow {
+			var data = map[string]interface{}{
+				"records": currentEnv.records,
+			}
+			buf := new(bytes.Buffer)
+			content.Execute(buf, data)
+			return currentEnv.GenerateImage(buf.String())
+		}
+		return ""
 	}))
 	//register get_hosted_fonts_"+*prefix
 	js.Global().Set("get_hosted_fonts_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
@@ -159,4 +179,9 @@ func main() {
 	//call wasm_ready_"+*prefix function of js
 	js.Global().Call("wasm_ready_"+*prefix, currentEnv.ToValue())
 	<-done
+}
+
+func (env *Env) GenerateImage(content string) string {
+	png, _ := qrcode.Encode(content, qrcode.Medium, 256)
+	return base64.StdEncoding.EncodeToString(png)
 }
