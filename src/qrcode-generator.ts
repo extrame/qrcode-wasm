@@ -157,7 +157,7 @@ export class QrcodeGenerator extends LitElement {
     }));
   }
 
-  async handleFontSourceChange(e: Event) {
+  async handleFontSourceChange() {
     // get value from first checked radio named 'font_source'
     var selected = this.shadowRoot?.querySelector(
       "input[name='font_source']:checked"
@@ -168,6 +168,7 @@ export class QrcodeGenerator extends LitElement {
       //get font from browser (need chrome or firefox)
       if ("queryLocalFonts" in window) {
         await navigator.permissions
+          // @ts-ignore
           .query({ name: "local-fonts" })
           .then((result) => {
             if (result.state === "granted") {
