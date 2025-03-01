@@ -40,7 +40,6 @@ export class QrcodeGenerator extends LitElement {
   @state() pageSize: number = 10;
   @state() showingAside: String = "about";
   @state() localFonts: any[] = [];
-  @state() preview: string = "";
 
   constructor() {
     super();
@@ -125,14 +124,14 @@ export class QrcodeGenerator extends LitElement {
         }
       };
       reader.readAsArrayBuffer(fileInput.files[0]);
-      this.getPreview();
+      this.requestUpdate();
     }
   }
-  getPreview() {
-    // @ts-ignore
-    this.preview = window["get_preview_" + this.randonStr].call(this);
-    this.requestUpdate();
-  }
+  // getPreview() {
+  //   // @ts-ignore
+  //   this.preview = window["get_preview_" + this.randonStr].call(this);
+  //   this.requestUpdate();
+  // }
 
   handleExportChange(key: string, e: Event) {
     e.preventDefault();
@@ -141,7 +140,6 @@ export class QrcodeGenerator extends LitElement {
     var callFn = window["set_export_settings_" + this.randonStr];
     callFn.call(this, key, value);
     // @ts-ignore
-    this.preview = window["get_preview_" + this.randonStr].call(this);
     this.requestUpdate();
   }
 
@@ -155,6 +153,26 @@ export class QrcodeGenerator extends LitElement {
       name,
       url,
     }));
+  }
+
+  get template(): string {
+    // @ts-ignore
+    return window["get_template_" + this.randonStr].call(this);
+  }
+
+  set template(value: string) {
+    // @ts-ignore
+    window["set_template_" + this.randonStr].call(this, value);
+    this.requestUpdate();
+  }
+
+  get preview() {
+    // @ts-ignore
+    var data = window["get_preview_" + this.randonStr].call(this)
+    if (data.startsWith("error: ")){
+      throw new Error(data.replaceAll("error: ", ""))
+    }
+    return data;
   }
 
   async handleFontSourceChange() {
@@ -417,8 +435,8 @@ export class QrcodeGenerator extends LitElement {
                     type="text"
                     id="template"
                     name="template"
-                    value=${this.config.template}
-                    @change=${this.handleExportChange.bind(this, "template")}
+                    value=${this.template}
+                    @change=${(e: any) => this.template = e.target.value}
                   />
                 </div>
                 <label for="width">宽度</label>
@@ -435,7 +453,7 @@ export class QrcodeGenerator extends LitElement {
                 ${when(
                   this.preview,
                   () => html`<div class="preview">
-                    <img src="data:image/png;base64,${this.preview}" alt="Preview" />
+                    <img src="${this.preview}" alt="Preview" />
                   </div>`
                 )}
               `,

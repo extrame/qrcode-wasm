@@ -26,7 +26,7 @@ var currentEnv = &Env{
 	Dpi:        72,
 	Width:      256,
 	Font:       "Courier",
-	template:   `${record[0]}`,
+	template:   `{{record0}}`,
 	previewRow: 0,
 }
 
@@ -148,32 +148,51 @@ func main() {
 	//register set_export_settings_"+*prefix
 	js.Global().Set("set_export_settings_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		var key = args[0]
-		var value = args[1]
+		// var value = args[1]
 		switch key.String() {
-		case "template":
-			currentEnv.template = value.String()
-
 		}
 		return nil
 	}))
 
 	//register get_preview_"+*prefix
 	js.Global().Set("get_preview_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		var content = template.Must(template.New("").Parse(currentEnv.template))
-		if len(currentEnv.records) >= currentEnv.previewRow {
-			var data = map[string]interface{}{
-				"records": currentEnv.records,
+
+		var funcs = template.FuncMap{}
+		if len(currentEnv.records) > currentEnv.previewRow {
+			line := currentEnv.records[currentEnv.previewRow]
+
+			for i := 0; i < len(line); i++ {
+				funcs[fmt.Sprintf("record%d", i)] = func() string {
+					return line[i]
+				}
 			}
-			buf := new(bytes.Buffer)
-			content.Execute(buf, data)
-			return currentEnv.GenerateImage(buf.String())
+		} else {
+			funcs["record0"] = func() string {
+				return "Unset"
+			}
 		}
-		return ""
+		buf := new(bytes.Buffer)
+		content, err := template.New("").Funcs(funcs).Parse(currentEnv.template)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		content.Execute(buf, args)
+		return currentEnv.GenerateImage(buf.String())
+		return "error: no data"
 	}))
 	//register get_hosted_fonts_"+*prefix
 	js.Global().Set("get_hosted_fonts_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		fmt.Println("Getting hosted fonts", hostedFonts)
 		return hostedFonts
+	}))
+
+	js.Global().Set("get_template_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return currentEnv.template
+	}))
+
+	js.Global().Set("set_template_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		currentEnv.template = args[0].String()
+		return nil
 	}))
 
 	//call wasm_ready_"+*prefix function of js
@@ -183,5 +202,5 @@ func main() {
 
 func (env *Env) GenerateImage(content string) string {
 	png, _ := qrcode.Encode(content, qrcode.Medium, 256)
-	return base64.StdEncoding.EncodeToString(png)
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
 }
