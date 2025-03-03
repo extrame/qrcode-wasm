@@ -156,29 +156,10 @@ func main() {
 
 	//register get_preview_"+*prefix
 	js.Global().Set("get_preview_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-
-		var funcs = template.FuncMap{}
-		if len(currentEnv.records) > currentEnv.previewRow {
-			line := currentEnv.records[currentEnv.previewRow]
-
-			for i := 0; i < len(line); i++ {
-				funcs[fmt.Sprintf("record%d", i)] = func() string {
-					return line[i]
-				}
-			}
-		} else {
-			funcs["record0"] = func() string {
-				return "Unset"
-			}
-		}
-		buf := new(bytes.Buffer)
-		content, err := template.New("").Funcs(funcs).Parse(currentEnv.template)
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		content.Execute(buf, args)
-		return currentEnv.GenerateImage(buf.String())
-		return "error: no data"
+		return currentEnv.GenerateImage(currentEnv.GenText(args))
+	}))
+	js.Global().Set("get_preview_text_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return currentEnv.GenText(args)
 	}))
 	//register get_hosted_fonts_"+*prefix
 	js.Global().Set("get_hosted_fonts_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
@@ -194,6 +175,15 @@ func main() {
 		currentEnv.template = args[0].String()
 		return nil
 	}))
+	//set_selected_row_"+*prefix
+	js.Global().Set("set_selected_row_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		currentEnv.previewRow = int(args[0].Int())
+		return nil
+	}))
+	//get_selected_row_"+*prefix
+	js.Global().Set("get_selected_row_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return currentEnv.previewRow
+	}))
 
 	//call wasm_ready_"+*prefix function of js
 	js.Global().Call("wasm_ready_"+*prefix, currentEnv.ToValue())
@@ -203,4 +193,28 @@ func main() {
 func (env *Env) GenerateImage(content string) string {
 	png, _ := qrcode.Encode(content, qrcode.Medium, 256)
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+}
+
+func (currentEnv *Env) GenText(args []js.Value) string {
+	var funcs = template.FuncMap{}
+	if len(currentEnv.records) > currentEnv.previewRow {
+		line := currentEnv.records[currentEnv.previewRow]
+
+		for i := 0; i < len(line); i++ {
+			funcs[fmt.Sprintf("record%d", i)] = func() string {
+				return line[i]
+			}
+		}
+	} else {
+		funcs["record0"] = func() string {
+			return "Unset"
+		}
+	}
+	buf := new(bytes.Buffer)
+	content, err := template.New("").Funcs(funcs).Parse(currentEnv.template)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	content.Execute(buf, args)
+	return buf.String()
 }

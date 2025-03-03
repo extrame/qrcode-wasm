@@ -105,28 +105,6 @@ export class QrcodeGenerator extends LitElement {
     return callFn.call(this, row, column);
   }
 
-  handleCsvFileChange(e: Event) {
-    e.preventDefault();
-    const fileInput = e.target as HTMLInputElement;
-    if (fileInput.files && fileInput.files[0]) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (reader.result) {
-          // @ts-ignore
-          var callFn = window["read_csv_" + this.randonStr];
-          var length = callFn.call(
-            this,
-            new Uint8Array(reader.result as ArrayBuffer)
-          );
-          this.csvLength = length;
-          this.getCsvColumns();
-          this.requestUpdate();
-        }
-      };
-      reader.readAsArrayBuffer(fileInput.files[0]);
-      this.requestUpdate();
-    }
-  }
   // getPreview() {
   //   // @ts-ignore
   //   this.preview = window["get_preview_" + this.randonStr].call(this);
@@ -168,11 +146,57 @@ export class QrcodeGenerator extends LitElement {
 
   get preview() {
     // @ts-ignore
-    var data = window["get_preview_" + this.randonStr].call(this)
-    if (data.startsWith("error: ")){
-      throw new Error(data.replaceAll("error: ", ""))
+    var data = window["get_preview_" + this.randonStr].call(this);
+    if (data.startsWith("error: ")) {
+      throw new Error(data.replaceAll("error: ", ""));
     }
     return data;
+  }
+
+  get preview_text() {
+    // @ts-ignore
+    var data = window["get_preview_text_" + this.randonStr].call(this);
+    if (data.startsWith("error: ")) {
+      throw new Error(data.replaceAll("error: ", ""));
+    }
+    return data;
+  }
+
+  set selectedRow(value: number) {
+    // @ts-ignore
+    var callFn = window["set_selected_row_" + this.randonStr];
+    callFn.call(this, value);
+    this.requestUpdate();
+  }
+
+  uploadCsv() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv";
+    input.addEventListener("change", (e) => {
+      e.preventDefault();
+      const fileInput = e.target as HTMLInputElement;
+      if (fileInput.files && fileInput.files[0]) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (reader.result) {
+            // @ts-ignore
+            var callFn = window["read_csv_" + this.randonStr];
+            var length = callFn.call(
+              this,
+              new Uint8Array(reader.result as ArrayBuffer)
+            );
+            this.csvLength = length;
+            this.getCsvColumns();
+            this.requestUpdate();
+          }
+        };
+        reader.readAsArrayBuffer(fileInput.files[0]);
+        this.requestUpdate();
+      }
+      document.body.removeChild(input);
+    });
+    input.click();
   }
 
   async handleFontSourceChange() {
@@ -208,40 +232,50 @@ export class QrcodeGenerator extends LitElement {
     this.requestUpdate();
   }
 
+  selectRow(index: number) {
+    this.selectedRow = this.pageOffset + index;
+  }
+
   render() {
     return html`
       <div class="main">
         <h1>数据预览</h1>
         <div class="data-table">
-          <p>CSV文件长度: ${this.csvLength}</p>
-          <div class="data-table-content">
-            <table>
-              <thead>
-                <tr>
-                  ${map(
-                    range(this.csvColumns),
-                    (i) => html`<th>列${i + 1}</th>`
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                ${map(
-                  range(this.pageSize),
-                  (i) => html`
+          ${when(
+            this.csvLength > 0,
+            () => html`
+              <p>CSV文件长度: ${this.csvLength}</p>
+              <div class="data-table-content">
+                <table>
+                  <thead>
                     <tr>
-                      ${map(range(this.csvColumns), (j) => {
-                        var data = this.getData(
-                          i + this.pageOffset * this.pageSize,
-                          j
-                        );
-                        return html`<td>${data}</td>`;
-                      })}
+                      ${map(
+                        range(this.csvColumns),
+                        (i) => html`<th>列${i + 1}</th>`
+                      )}
                     </tr>
-                  `
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    ${map(
+                      range(this.pageSize),
+                      (i) => html`
+                        <tr @click=${this.selectRow.bind(this,i)}>
+                          ${map(range(this.csvColumns), (j) => {
+                            var data = this.getData(
+                              i + this.pageOffset * this.pageSize,
+                              j
+                            );
+                            return html`<td>${data}</td>`;
+                          })}
+                        </tr>
+                      `
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            `,
+            () => html` <p>请在配置页上传CSV文件</p> `
+          )}
         </div>
         <div class="pagination">
           <button
@@ -279,12 +313,6 @@ export class QrcodeGenerator extends LitElement {
           >
             参数配置
           </button>
-          <button
-            @click=${() => (this.showingAside = "exporter")}
-            class=${classMap({ active: this.showingAside === "exporter" })}
-          >
-            导出配置
-          </button>
         </div>
         <div class="aside-content">
           ${choose(this.showingAside, [
@@ -318,145 +346,128 @@ export class QrcodeGenerator extends LitElement {
             ],
             [
               "config",
-              () => html` <form @submit=${this.changeConfig}>
-                <div>
-                  <label for="font_size"> 字体大小 </label>
-                  <input
-                    type="number"
-                    id="font_size"
-                    name="font_size"
-                    value=${this.config.font_size}
-                  />
-                </div>
-                <div>
-                  <label for="dpi"> DPI </label>
-                  <input
-                    type="number"
-                    id="dpi"
-                    name="dpi"
-                    value=${this.config.dpi}
-                  />
-                </div>
-                <!-- add a radio to select font source in local/url/server -->
-                <div>
-                  <label for="font_source"> 字体来源 </label>
-                  <div class="container">
-                    <label
-                      ><input
-                        type="radio"
-                        name="font_source"
-                        @change=${this.handleFontSourceChange}
-                        value="browser"
-                        ?checked=${this.config.font_source === "browser"}
-                      />浏览器字体文件</label
-                    >
-                    <select
-                      id="font_server_source"
-                      ?hidden=${this.config.font_source !== "browser"}
-                      @change=${this.handleExportChange.bind(this, "font")}
-                    >
-                      ${map(
-                        this.localFonts,
-                        (source, index) =>
-                          html`<option value="${index}">
-                            ${source.fullName}
-                          </option>`
-                      )}
-                    </select>
-                    <label
-                      ><input
-                        type="radio"
-                        name="font_source"
-                        @change=${this.handleFontSourceChange}
-                        value="local"
-                        ?checked=${this.config.font_source === "local"}
-                      />本地字体文件</label
-                    >
-                    <input
-                      type="file"
-                      id="font_local_source_file"
-                      ?hidden=${this.config.font_source !== "local"}
-                    />
-                    <label
-                      ><input
-                        type="radio"
-                        name="font_source"
-                        @change=${this.handleFontSourceChange}
-                        value="url"
-                        ?checked=${this.config.font_source === "url"}
-                      />URL字体文件</label
-                    >
-                    <input
-                      type="text"
-                      ?hidden=${this.config.font_source !== "url"}
-                      value="${this.config.font}"
-                      placeholder="字体URL"
-                      @change=${this.handleExportChange}
-                    />
-                    <label
-                      ><input
-                        type="radio"
-                        name="font_source"
-                        @change=${this.handleFontSourceChange}
-                        value="server"
-                        ?checked=${this.config.font_source === "server"}
-                      />服务器字体文件</label
-                    >
-                    <select
-                      id="font_server_source"
-                      ?hidden=${this.config.font_source !== "server"}
-                      @change=${this.handleExportChange}
-                    >
-                      ${map(
-                        this.fontServerSources,
-                        (source) =>
-                          html`<option value="${source.url}">
-                            ${source.name}
-                          </option>`
-                      )}
-                    </select>
-                  </div>
-                </div>
-                <button type="submit">提交</button>
-              </form>`,
-            ],
-            [
-              "exporter",
-              () => html`
-                <input
-                  type="file"
-                  id="file-input"
-                  @change=${this.handleCsvFileChange}
-                />
-                <small>选择CSV文件</small>
-                <div>
-                  <label for="template">模板</label>
+              () => html` <div>
+                  <button id="csv_updater" @click=${this.uploadCsv.bind(this)}>
+                    选择CSV文件
+                  </button>
+                  <div><label for="template">模板</label>
                   <input
                     type="text"
                     id="template"
                     name="template"
                     value=${this.template}
-                    @change=${(e: any) => this.template = e.target.value}
-                  />
+                    @change=${(e: any) => (this.template = e.target.value)}
+                  /></div>
+                  ${when(
+                    this.preview,
+                    () => html`<div class="preview">
+                      <h2>预览</h2>
+                      <img src="${this.preview}" alt="Preview" />
+                      <span>对应内容：${this.preview_text}</span>
+                    </div>`
+                  )}
                 </div>
-                <label for="width">宽度</label>
-                <input
-                  type="number"
-                  id="width"
-                  name="width"
-                  value=${this.config.width}
-                  min="100"
-                  max="1000"
-                  step="10"
-                  @change=${this.handleExportChange}
-                />
-                ${when(
-                  this.preview,
-                  () => html`<div class="preview">
-                    <img src="${this.preview}" alt="Preview" />
-                  </div>`
-                )}
-              `,
+                <form @submit=${this.changeConfig}>
+                  <div>
+                    <label for="font_size"> 字体大小 </label>
+                    <input
+                      type="number"
+                      id="font_size"
+                      name="font_size"
+                      value=${this.config.font_size}
+                    />
+                  </div>
+                  <div>
+                    <label for="dpi"> DPI </label>
+                    <input
+                      type="number"
+                      id="dpi"
+                      name="dpi"
+                      value=${this.config.dpi}
+                    />
+                  </div>
+                  <!-- add a radio to select font source in local/url/server -->
+                  <div>
+                    <label for="font_source"> 字体来源 </label>
+                    <div class="container">
+                      <label
+                        ><input
+                          type="radio"
+                          name="font_source"
+                          @change=${this.handleFontSourceChange}
+                          value="browser"
+                          ?checked=${this.config.font_source === "browser"}
+                        />浏览器字体文件</label
+                      >
+                      <select
+                        id="font_server_source"
+                        ?hidden=${this.config.font_source !== "browser"}
+                        @change=${this.handleExportChange.bind(this, "font")}
+                      >
+                        ${map(
+                          this.localFonts,
+                          (source, index) =>
+                            html`<option value="${index}">
+                              ${source.fullName}
+                            </option>`
+                        )}
+                      </select>
+                      <label
+                        ><input
+                          type="radio"
+                          name="font_source"
+                          @change=${this.handleFontSourceChange}
+                          value="local"
+                          ?checked=${this.config.font_source === "local"}
+                        />本地字体文件</label
+                      >
+                      <input
+                        type="file"
+                        id="font_local_source_file"
+                        ?hidden=${this.config.font_source !== "local"}
+                      />
+                      <label
+                        ><input
+                          type="radio"
+                          name="font_source"
+                          @change=${this.handleFontSourceChange}
+                          value="url"
+                          ?checked=${this.config.font_source === "url"}
+                        />URL字体文件</label
+                      >
+                      <input
+                        type="text"
+                        ?hidden=${this.config.font_source !== "url"}
+                        value="${this.config.font}"
+                        placeholder="字体URL"
+                        @change=${this.handleExportChange}
+                      />
+                      <label
+                        ><input
+                          type="radio"
+                          name="font_source"
+                          @change=${this.handleFontSourceChange}
+                          value="server"
+                          ?checked=${this.config.font_source === "server"}
+                        />服务器字体文件</label
+                      >
+                      <select
+                        id="font_server_source"
+                        ?hidden=${this.config.font_source !== "server"}
+                        @change=${this.handleExportChange}
+                      >
+                        ${map(
+                          this.fontServerSources,
+                          (source) =>
+                            html`<option value="${source.url}">
+                              ${source.name}
+                            </option>`
+                        )}
+                      </select>
+                    </div>
+                  </div>
+                  <button type="submit">提交</button>
+                </form>`,
             ],
           ])}
         </div>
@@ -498,6 +509,20 @@ export class QrcodeGenerator extends LitElement {
         overflow: auto;
         background-color: #f5f5f5;
         padding: 10px;
+
+        tr {
+          justify-content: space-between;
+          align-items: center;
+          width: 100%;
+          background-color: #fff;
+          border: 1px solid #ccc;
+          padding: 10px;
+
+          &:hover {
+            background-color: #f5f5f5;
+          }
+
+        }
       }
 
       .pagination {
@@ -553,6 +578,10 @@ export class QrcodeGenerator extends LitElement {
 
         > * {
           padding: 10px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
         }
 
         h1 {
@@ -562,6 +591,27 @@ export class QrcodeGenerator extends LitElement {
           background-color: #e0e0e0;
           width: calc(100% - 20px);
           padding: 10px;
+        }
+
+        h2 {
+          font-size: 1.1em;
+          margin-bottom: 6px;
+          text-align: left;
+          width: calc(100% - 20px);
+          padding: 10px;
+        }
+
+        #csv_updater {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          width: 200px;
+          height: 50px;
+          overflow: auto;
+          margin: 10px;
+          background-color: #e0e0e0;
+          border: none;
         }
       }
 
