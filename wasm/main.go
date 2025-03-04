@@ -1,12 +1,14 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/base64"
 	"encoding/csv"
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"syscall/js"
@@ -156,10 +158,10 @@ func main() {
 
 	//register get_preview_"+*prefix
 	js.Global().Set("get_preview_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		return currentEnv.GenerateImage(currentEnv.GenText(args))
+		return currentEnv.GenerateImage(currentEnv.GenText(currentEnv.previewRow))
 	}))
 	js.Global().Set("get_preview_text_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		return currentEnv.GenText(args)
+		return currentEnv.GenText(currentEnv.previewRow)
 	}))
 	//register get_hosted_fonts_"+*prefix
 	js.Global().Set("get_hosted_fonts_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
@@ -184,6 +186,33 @@ func main() {
 	js.Global().Set("get_selected_row_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		return currentEnv.previewRow
 	}))
+	//download_"+*prefix
+	js.Global().Set("download_"+*prefix, js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+
+		if len(currentEnv.records) == 0 {
+			return nil
+		}
+
+		var buf bytes.Buffer
+		var zipWriter = zip.NewWriter(&buf)
+		for i := 0; i < len(currentEnv.records); i++ {
+			var fileName = fmt.Sprintf("%d.png", i)
+			fileWriter, err := zipWriter.Create(fileName)
+			if err != nil {
+				slog.Error("error creating file writer: ", err)
+				return nil
+			}
+			content := currentEnv.GenText(i)
+			png, _ := qrcode.Encode(content, qrcode.Medium, 256)
+			_, _ = fileWriter.Write(png)
+			zipWriter.Flush()
+		}
+		zipWriter.Close()
+		//new uint8array from buf
+		var dst = js.Global().Get("Uint8Array").New(buf.Len())
+		js.CopyBytesToJS(dst, buf.Bytes())
+		return dst
+	}))
 
 	//call wasm_ready_"+*prefix function of js
 	js.Global().Call("wasm_ready_"+*prefix, currentEnv.ToValue())
@@ -195,10 +224,10 @@ func (env *Env) GenerateImage(content string) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
 }
 
-func (currentEnv *Env) GenText(args []js.Value) string {
+func (currentEnv *Env) GenText(i int) string {
 	var funcs = template.FuncMap{}
-	if len(currentEnv.records) > currentEnv.previewRow {
-		line := currentEnv.records[currentEnv.previewRow]
+	if len(currentEnv.records) > i {
+		line := currentEnv.records[i]
 
 		for i := 0; i < len(line); i++ {
 			funcs[fmt.Sprintf("record%d", i)] = func() string {
@@ -215,6 +244,6 @@ func (currentEnv *Env) GenText(args []js.Value) string {
 	if err != nil {
 		return "error: " + err.Error()
 	}
-	content.Execute(buf, args)
+	content.Execute(buf, nil)
 	return buf.String()
 }

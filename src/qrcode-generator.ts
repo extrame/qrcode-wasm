@@ -236,6 +236,28 @@ export class QrcodeGenerator extends LitElement {
     this.selectedRow = this.pageOffset + index;
   }
 
+  download() {
+    //create a uint8array from the qrcode zip
+    // var dst = new Uint8Array();
+    //pass dst to wasm to fill it
+    // @ts-ignore
+    var callFn = window["download_" + this.randonStr];
+    var dst = callFn.call(this);
+    const blob = new Blob([dst], { type: "application/zip" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "qrcode.zip";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 0);
+
+
+  }
+
   render() {
     return html`
       <div class="main">
@@ -366,6 +388,7 @@ export class QrcodeGenerator extends LitElement {
                       <span>对应内容：${this.preview_text}</span>
                     </div>`
                   )}
+                  <button @click=${this.download}>批量下载</button>
                 </div>
                 <form @submit=${this.changeConfig}>
                   <div>
